@@ -1,0 +1,490 @@
+//! Configuration module for the agent-skills-generator.
+//!
+//! This module handles loading and parsing the `skills.yaml` configuration file
+//! which defines crawling rules, output directories, and other settings.
+
+use anyhow::{Context, Result};
+use globset::{Glob, GlobSet, GlobSetBuilder};
+use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
+
+/// Default output directory for generated skills.
+const DEFAULT_OUTPUT_DIR: &str = ".agent/skills";
+
+/// Default crawl delay in milliseconds (polite crawling).
+const DEFAULT_DELAY_MS: u64 = 100;
+
+/// Default maximum depth for crawling.
+const DEFAULT_MAX_DEPTH: usize = 25;
+
+/// Default request timeout in seconds.
+const DEFAULT_REQUEST_TIMEOUT_SECS: u64 = 30;
+
+/// Root configuration structure.
+///
+/// Maps to the `skills.yaml` file format:
+/// ```yaml
+/// output: .agent/skills
+/// flat: true
+/// user_agent: "AgentSkillsBot/1.0"
+/// delay_ms: 100
+/// max_depth: 25
+/// rules:
+///   - url: "https://docs.flutter.dev/*"
+///     action: "allow"
+///   - url: "*/api/*"
+///     action: "ignore"
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Config {
+    /// Output directory for generated skills.
+    #[serde(default = "default_output")]
+    pub output: PathBuf,
+
+    /// If true, creates a flat directory structure (no nested subdirectories).
+    #[serde(default)]
+    pub flat: bool,
+
+    /// Custom User-Agent string for HTTP requests.
+    #[serde(default)]
+    pub user_agent: Option<String>,
+
+    /// Delay between requests in milliseconds (polite crawling).
+    #[serde(default = "default_delay")]
+    pub delay_ms: u64,
+
+    /// Maximum crawl depth.
+    #[serde(default = "default_max_depth")]
+    pub max_depth: usize,
+
+    /// Request timeout in seconds.
+    #[serde(default = "default_timeout")]
+    pub request_timeout_secs: u64,
+
+    /// Whether to respect robots.txt.
+    #[serde(default = "default_true")]
+    pub respect_robots_txt: bool,
+
+    /// Allow subdomains when crawling.
+    #[serde(default)]
+    pub subdomains: bool,
+
+    /// URL filtering rules.
+    #[serde(default)]
+    pub rules: Vec<Rule>,
+
+    /// CSS selectors for elements to remove from content.
+    #[serde(default = "default_remove_selectors")]
+    pub remove_selectors: Vec<String>,
+
+    /// Concurrency limit for parallel page processing.
+    #[serde(default = "default_concurrency")]
+    pub concurrency: usize,
+}
+
+fn default_output() -> PathBuf {
+    PathBuf::from(DEFAULT_OUTPUT_DIR)
+}
+
+fn default_delay() -> u64 {
+    DEFAULT_DELAY_MS
+}
+
+fn default_max_depth() -> usize {
+    DEFAULT_MAX_DEPTH
+}
+
+fn default_timeout() -> u64 {
+    DEFAULT_REQUEST_TIMEOUT_SECS
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_concurrency() -> usize {
+    4
+}
+
+/// Default CSS selectors for elements that should be removed from content.
+/// These typically contain navigation, ads, or other non-content elements.
+fn default_remove_selectors() -> Vec<String> {
+    vec![
+        "nav".to_string(),
+        "footer".to_string(),
+        "header".to_string(),
+        "script".to_string(),
+        "style".to_string(),
+        "noscript".to_string(),
+        "iframe".to_string(),
+        ".toc".to_string(),
+        ".table-of-contents".to_string(),
+        ".sidebar".to_string(),
+        ".navigation".to_string(),
+        ".nav".to_string(),
+        ".menu".to_string(),
+        ".breadcrumb".to_string(),
+        ".breadcrumbs".to_string(),
+        ".ads".to_string(),
+        ".advertisement".to_string(),
+        ".cookie-banner".to_string(),
+        ".cookie-consent".to_string(),
+        "[role='navigation']".to_string(),
+        "[role='banner']".to_string(),
+        "[role='contentinfo']".to_string(),
+    ]
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            output: default_output(),
+            flat: false,
+            user_agent: None,
+            delay_ms: default_delay(),
+            max_depth: default_max_depth(),
+            request_timeout_secs: default_timeout(),
+            respect_robots_txt: true,
+            subdomains: false,
+            rules: Vec::new(),
+            remove_selectors: default_remove_selectors(),
+            concurrency: default_concurrency(),
+        }
+    }
+}
+
+impl Config {
+    /// Loads configuration from a YAML file.
+    ///
+    /// # Arguments
+    /// * `path` - Path to the configuration file
+    ///
+    /// # Returns
+    /// The parsed configuration or an error.
+    pub fn load(path: impl AsRef<Path>) -> Result<Self> {
+        let path = path.as_ref();
+        let content = fs_err::read_to_string(path)
+            .with_context(|| format!("Failed to read config file: {}", path.display()))?;
+
+        let config: Config = serde_yaml::from_str(&content)
+            .with_context(|| format!("Failed to parse config file: {}", path.display()))?;
+
+        Ok(config)
+    }
+
+    /// Loads configuration from a YAML string.
+    pub fn from_yaml(yaml: &str) -> Result<Self> {
+        serde_yaml::from_str(yaml).context("Failed to parse YAML configuration")
+    }
+
+    /// Builds a UrlFilter from the configured rules.
+    pub fn build_url_filter(&self) -> Result<UrlFilter> {
+        UrlFilter::new(&self.rules)
+    }
+
+    /// Checks if a URL should be crawled based on the configured rules.
+    ///
+    /// Rules are evaluated using globset. Ignore rules take precedence,
+    /// then allow rules are checked. If allow rules exist, non-matching URLs are ignored.
+    pub fn should_crawl(&self, url: &str) -> bool {
+        // Build filter on demand (for simple usage)
+        match self.build_url_filter() {
+            Ok(filter) => filter.should_crawl(url),
+            Err(_) => {
+                // Fallback to simple matching if filter build fails
+                for rule in &self.rules {
+                    if rule.matches(url) {
+                        return matches!(rule.action, Action::Allow);
+                    }
+                }
+                true
+            }
+        }
+    }
+
+    /// Returns URLs that should be blacklisted (for spider configuration).
+    /// These are converted to regex patterns for spider's blacklist_url.
+    pub fn get_blacklist_patterns(&self) -> Vec<String> {
+        self.rules
+            .iter()
+            .filter(|r| matches!(r.action, Action::Ignore))
+            .map(|r| r.to_regex_pattern())
+            .collect()
+    }
+
+    /// Returns URLs that should be whitelisted (for spider configuration).
+    /// These are converted to regex patterns for spider's whitelist_url.
+    pub fn get_whitelist_regex_patterns(&self) -> Vec<String> {
+        self.rules
+            .iter()
+            .filter(|r| matches!(r.action, Action::Allow))
+            .map(|r| r.to_regex_pattern())
+            .collect()
+    }
+
+    /// Returns raw whitelist patterns (glob format).
+    pub fn get_whitelist_patterns(&self) -> Vec<String> {
+        self.rules
+            .iter()
+            .filter(|r| matches!(r.action, Action::Allow))
+            .map(|r| r.url.clone())
+            .collect()
+    }
+
+    /// Checks if there are any allow rules configured.
+    pub fn has_allow_rules(&self) -> bool {
+        self.rules.iter().any(|r| matches!(r.action, Action::Allow))
+    }
+}
+
+/// A URL filtering rule.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Rule {
+    /// URL pattern to match. Supports glob-like patterns:
+    /// - `*` matches any sequence of characters
+    /// - `?` matches any single character
+    pub url: String,
+
+    /// Action to take when the URL matches.
+    pub action: Action,
+
+    /// Optional: Only apply this rule to specific content types.
+    #[serde(default)]
+    pub content_type: Option<String>,
+}
+
+impl Rule {
+    /// Checks if this rule matches the given URL using globset.
+    pub fn matches(&self, url: &str) -> bool {
+        match Glob::new(&self.url) {
+            Ok(glob) => glob.compile_matcher().is_match(url),
+            Err(_) => {
+                // If glob compilation fails, fall back to simple contains check
+                url.contains(&self.url.replace('*', ""))
+            }
+        }
+    }
+
+    /// Converts the glob pattern to a regex pattern for spider's blacklist.
+    pub fn to_regex_pattern(&self) -> String {
+        glob_to_regex(&self.url)
+    }
+}
+
+/// Action to take for matched URLs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Action {
+    /// Allow crawling this URL.
+    Allow,
+    /// Ignore (skip) this URL.
+    Ignore,
+}
+
+/// Converts a glob-like pattern to a regex pattern.
+fn glob_to_regex(glob: &str) -> String {
+    let mut regex = String::with_capacity(glob.len() * 2);
+    regex.push('^');
+
+    for c in glob.chars() {
+        match c {
+            '*' => regex.push_str(".*"),
+            '?' => regex.push('.'),
+            '.' | '+' | '(' | ')' | '[' | ']' | '{' | '}' | '^' | '$' | '|' | '\\' => {
+                regex.push('\\');
+                regex.push(c);
+            }
+            _ => regex.push(c),
+        }
+    }
+
+    regex.push('$');
+    regex
+}
+
+/// URL filter using compiled GlobSet for efficient matching.
+///
+/// This provides O(n) matching against multiple patterns simultaneously.
+#[derive(Debug)]
+pub struct UrlFilter {
+    /// GlobSet for "allow" patterns.
+    allow_set: GlobSet,
+    /// GlobSet for "ignore" patterns.
+    ignore_set: GlobSet,
+    /// Whether we have any allow rules (if so, non-matching URLs are ignored).
+    has_allow_rules: bool,
+}
+
+impl UrlFilter {
+    /// Creates a new URL filter from a list of rules.
+    pub fn new(rules: &[Rule]) -> Result<Self> {
+        let mut allow_builder = GlobSetBuilder::new();
+        let mut ignore_builder = GlobSetBuilder::new();
+        let mut has_allow_rules = false;
+
+        for rule in rules {
+            let glob = Glob::new(&rule.url)
+                .with_context(|| format!("Invalid glob pattern: {}", rule.url))?;
+
+            match rule.action {
+                Action::Allow => {
+                    allow_builder.add(glob);
+                    has_allow_rules = true;
+                }
+                Action::Ignore => {
+                    ignore_builder.add(glob);
+                }
+            }
+        }
+
+        let allow_set = allow_builder
+            .build()
+            .context("Failed to build allow GlobSet")?;
+        let ignore_set = ignore_builder
+            .build()
+            .context("Failed to build ignore GlobSet")?;
+
+        Ok(Self {
+            allow_set,
+            ignore_set,
+            has_allow_rules,
+        })
+    }
+
+    /// Checks if a URL should be crawled.
+    ///
+    /// Logic (allow rules take precedence over ignore rules):
+    /// 1. If URL matches any "allow" pattern, return true
+    /// 2. If URL matches any "ignore" pattern, return false
+    /// 3. If we have "allow" rules but URL doesn't match, return false
+    /// 4. If we have no "allow" rules and not ignored, return true (default allow)
+    pub fn should_crawl(&self, url: &str) -> bool {
+        // First check allow patterns - these take precedence
+        if self.allow_set.is_match(url) {
+            return true;
+        }
+
+        // Then check ignore patterns
+        if self.ignore_set.is_match(url) {
+            return false;
+        }
+
+        // If we have allow rules but URL didn't match any, reject it
+        if self.has_allow_rules {
+            return false;
+        }
+
+        // No allow rules and not ignored = allowed
+        true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_default_config() {
+        let config = Config::default();
+        assert_eq!(config.output, PathBuf::from(".agent/skills"));
+        assert!(!config.flat);
+        assert!(config.respect_robots_txt);
+        assert_eq!(config.delay_ms, 100);
+    }
+
+    #[test]
+    fn test_parse_yaml() {
+        let yaml = r#"
+output: ./output
+flat: true
+delay_ms: 200
+rules:
+  - url: "https://docs.flutter.dev/*"
+    action: allow
+  - url: "*/api/internal/*"
+    action: ignore
+"#;
+
+        let config = Config::from_yaml(yaml).unwrap();
+        assert_eq!(config.output, PathBuf::from("./output"));
+        assert!(config.flat);
+        assert_eq!(config.delay_ms, 200);
+        assert_eq!(config.rules.len(), 2);
+    }
+
+    #[test]
+    fn test_rule_matching() {
+        let rule = Rule {
+            url: "https://docs.flutter.dev/*".to_string(),
+            action: Action::Allow,
+            content_type: None,
+        };
+
+        assert!(rule.matches("https://docs.flutter.dev/get-started"));
+        assert!(rule.matches("https://docs.flutter.dev/api/widgets"));
+        assert!(!rule.matches("https://flutter.dev/docs"));
+    }
+
+    #[test]
+    fn test_should_crawl() {
+        let config = Config::from_yaml(
+            r#"
+rules:
+  - url: "*/internal/*"
+    action: ignore
+  - url: "*/docs/*"
+    action: allow
+"#,
+        )
+        .unwrap();
+
+        assert!(config.should_crawl("https://example.com/docs/api"));
+        assert!(!config.should_crawl("https://example.com/internal/admin"));
+        // With allow rules present, non-matching URLs are rejected
+        assert!(!config.should_crawl("https://example.com/public"));
+    }
+
+    #[test]
+    fn test_should_crawl_no_allow_rules() {
+        // When only ignore rules exist, non-matching URLs are allowed
+        let config = Config::from_yaml(
+            r#"
+rules:
+  - url: "*/internal/*"
+    action: ignore
+"#,
+        )
+        .unwrap();
+
+        assert!(config.should_crawl("https://example.com/docs/api"));
+        assert!(!config.should_crawl("https://example.com/internal/admin"));
+        assert!(config.should_crawl("https://example.com/public")); // No allow rules, default allow
+    }
+
+    #[test]
+    fn test_glob_to_regex() {
+        assert_eq!(glob_to_regex("*.txt"), "^.*\\.txt$");
+        assert_eq!(glob_to_regex("hello?world"), "^hello.world$");
+        assert_eq!(glob_to_regex("test[1]"), "^test\\[1\\]$");
+    }
+
+    #[test]
+    fn test_url_pattern_matching() {
+        // Test that URL patterns match correctly
+        let config = Config::from_yaml(
+            r#"
+rules:
+  - url: "https://docs.flutter.dev/ui/*"
+    action: allow
+"#,
+        )
+        .unwrap();
+
+        // The base URL with trailing slash should match (glob * matches zero or more)
+        assert!(config.should_crawl("https://docs.flutter.dev/ui/"));
+        assert!(config.should_crawl("https://docs.flutter.dev/ui/widgets"));
+        assert!(config.should_crawl("https://docs.flutter.dev/ui/widgets/buttons"));
+        assert!(!config.should_crawl("https://docs.flutter.dev/cookbook/"));
+        assert!(!config.should_crawl("https://docs.flutter.dev/"));
+    }
+}

@@ -1,0 +1,67 @@
+[package]
+name = "agent-skills-generator"
+version = "0.1.0"
+edition = "2024"
+description = "A production-grade CLI tool for crawling websites and generating agent skills with the Reference Pattern"
+license = "MIT"
+authors = ["Agent Skills Generator Contributors"]
+keywords = ["crawler", "agent", "skills", "markdown", "llm"]
+categories = ["command-line-utilities", "web-programming"]
+
+[dependencies]
+# Async runtime
+tokio = { version = "1.43", features = ["full"] }
+
+# Error handling
+anyhow = "1.0"
+thiserror = "2.0"
+
+# Better file I/O errors
+fs-err = { version = "3.2.2", features = ["tokio"] }
+
+# CLI argument parsing
+clap = { version = "4.5", features = ["derive", "env"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_yaml = "0.9.34-deprecated"
+
+# Web crawling - spider with sync and regex features for subscriptions and URL filtering
+spider = { version = "2.39.21", features = ["sync", "regex"] }
+
+# URL handling
+url = "2.5"
+
+# HTML parsing and DOM manipulation
+scraper = "0.25.0"
+
+# HTML to Markdown conversion
+htmd = "0.5.0"
+
+# Regex for pattern matching
+regex = "1.11"
+
+# Glob pattern matching
+globset = "0.4.18"
+
+# Case conversion utilities
+convert_case = "0.10.0"
+
+# Date/time handling
+chrono = { version = "0.4", features = ["serde"] }
+
+# Async channel for page processing
+async-channel = "2.3"
+
+# HTTP client for single URL fetching
+reqwest = { version = "0.13.1", features = ["json"] }
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
