@@ -1,0 +1,145 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+jobs:
+  create-release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    outputs:
+      upload_url: ${{ steps.create_release.outputs.upload_url }}
+      version: ${{ steps.tag_name.outputs.VERSION }}
+    steps:
+      - name: Get version from tag
+        id: tag_name
+        run: |
+          echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ steps.tag_name.outputs.VERSION }}
+          release_name: Release ${{ steps.tag_name.outputs.VERSION }}
+          body: |
+            Release ${{ steps.tag_name.outputs.VERSION }}
+
+            See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md) for details.
+          draft: false
+          prerelease: false
+
+  build:
+    name: Build ${{ matrix.build.name }}
+    needs: create-release
+    runs-on: ${{ matrix.build.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        build:
+          - name: Linux (x86_64)
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            use_cross: false
+          - name: Linux (ARM64)
+            os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            use_cross: true
+          - name: macOS (Intel)
+            os: macos-latest
+            target: x86_64-apple-darwin
+            use_cross: false
+          - name: macOS (ARM64)
+            os: macos-latest
+            target: aarch64-apple-darwin
+            use_cross: false
+          - name: Windows (x86_64)
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+            use_cross: false
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.build.target }}
+
+      - name: Install cross
+        if: matrix.build.use_cross
+        run: cargo install cross
+
+      - name: Build
+        run: |
+          if [ "${{ matrix.build.use_cross }}" = "true" ]; then
+            cross build --release --target ${{ matrix.build.target }}
+          else
+            cargo build --release --target ${{ matrix.build.target }}
+          fi
+        shell: bash
+
+      - name: Determine binary name
+        id: binary
+        run: |
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            echo "name=agent-skills-generator.exe" >> $GITHUB_OUTPUT
+          else
+            echo "name=agent-skills-generator" >> $GITHUB_OUTPUT
+          fi
+        shell: bash
+
+      - name: Create artifact directory
+        run: mkdir -p artifacts
+
+      - name: Copy binary
+        run: |
+          cp target/${{ matrix.build.target }}/release/${{ steps.binary.outputs.name }} artifacts/
+        shell: bash
+
+      - name: Strip binary (Unix)
+        if: runner.os != 'Windows'
+        run: strip artifacts/${{ steps.binary.outputs.name }} || true
+        shell: bash
+
+      - name: Create tarball (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          cd artifacts
+          tar czf agent-skills-generator-${{ needs.create-release.outputs.version }}-${{ matrix.build.target }}.tar.gz ${{ steps.binary.outputs.name }}
+          ls -lah
+        shell: bash
+
+      - name: Create zip (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          cd artifacts
+          7z a agent-skills-generator-${{ needs.create-release.outputs.version }}-${{ matrix.build.target }}.zip ${{ steps.binary.outputs.name }}
+          dir
+        shell: bash
+
+      - name: Upload Release Asset (Unix)
+        if: runner.os != 'Windows'
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ needs.create-release.outputs.upload_url }}
+          asset_path: artifacts/agent-skills-generator-${{ needs.create-release.outputs.version }}-${{ matrix.build.target }}.tar.gz
+          asset_name: agent-skills-generator-${{ needs.create-release.outputs.version }}-${{ matrix.build.target }}.tar.gz
+          asset_content_type: application/gzip
+
+      - name: Upload Release Asset (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ needs.create-release.outputs.upload_url }}
+          asset_path: artifacts/agent-skills-generator-${{ needs.create-release.outputs.version }}-${{ matrix.build.target }}.zip
+          asset_name: agent-skills-generator-${{ needs.create-release.outputs.version }}-${{ matrix.build.target }}.zip
+          asset_content_type: application/zip
