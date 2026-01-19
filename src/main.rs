@@ -46,7 +46,7 @@ pub mod utils;
 use anyhow::{Context, Result};
 use cli::{Cli, Commands, DEFAULT_CONFIG};
 use config::{Action, Config, Rule};
-use crawler::{clean_output_dir, Crawler};
+use crawler::{Crawler, clean_output_dir};
 use processor::Processor;
 use std::io::{self, Write};
 use tracing::{error, info, warn};
@@ -76,8 +76,8 @@ async fn main() -> Result<()> {
 fn init_logging(cli: &Cli) {
     let level = cli.log_level();
 
-    let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new(level.to_string()));
+    let filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(level.to_string()));
 
     tracing_subscriber::fmt()
         .with_env_filter(filter)
@@ -252,7 +252,10 @@ fn run_validate(cli: &Cli, args: &cli::ValidateArgs) -> Result<()> {
             println!("  {}. {} -> {:?}", i + 1, rule.url, rule.action);
         }
 
-        println!("Remove selectors: {} defined", config.remove_selectors.len());
+        println!(
+            "Remove selectors: {} defined",
+            config.remove_selectors.len()
+        );
     }
 
     Ok(())
@@ -311,8 +314,12 @@ fn run_init(args: &cli::InitArgs) -> Result<()> {
         );
     }
 
-    fs_err::write(&args.path, DEFAULT_CONFIG)
-        .with_context(|| format!("Failed to write configuration file: {}", args.path.display()))?;
+    fs_err::write(&args.path, DEFAULT_CONFIG).with_context(|| {
+        format!(
+            "Failed to write configuration file: {}",
+            args.path.display()
+        )
+    })?;
 
     info!("Created configuration file: {}", args.path.display());
     info!("Edit this file to customize crawling behavior, then run:");

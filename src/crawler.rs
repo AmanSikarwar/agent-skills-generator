@@ -12,9 +12,9 @@ use crate::processor::Processor;
 use anyhow::{Context, Result};
 use spider::page::Page;
 use spider::website::Website;
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 use tokio::sync::Semaphore;
 use tracing::{debug, error, info, warn};
@@ -202,8 +202,9 @@ impl Crawler {
         website.configuration.depth = self.config.max_depth;
 
         // Set request timeout
-        website.configuration.request_timeout =
-            Some(Box::new(Duration::from_secs(self.config.request_timeout_secs)));
+        website.configuration.request_timeout = Some(Box::new(Duration::from_secs(
+            self.config.request_timeout_secs,
+        )));
 
         // Configure whitelist from allow rules - these are regex patterns
         // Spider will ONLY crawl URLs matching these patterns
@@ -248,7 +249,7 @@ impl Crawler {
     async fn process_page(
         processor: &Processor,
         page: &Page,
-        output_dir: &PathBuf,
+        output_dir: &Path,
     ) -> Result<PathBuf> {
         let url = page.get_url();
         let html = page.get_html();

@@ -8,7 +8,7 @@
 //! - `validate` - Validate the configuration file
 
 use clap::{Args, Parser, Subcommand};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Agent Skills Generator - A production-grade CLI tool for crawling websites
 /// and generating agent skills following the Reference Pattern.
@@ -181,8 +181,10 @@ impl Cli {
     /// Get the effective output directory.
     ///
     /// Prefers command-line argument over config file value.
-    pub fn effective_output(&self, config_output: &PathBuf) -> PathBuf {
-        self.output.clone().unwrap_or_else(|| config_output.clone())
+    pub fn effective_output(&self, config_output: &Path) -> PathBuf {
+        self.output
+            .clone()
+            .unwrap_or_else(|| config_output.to_path_buf())
     }
 
     /// Get the log level based on verbosity flags.

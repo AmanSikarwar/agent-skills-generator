@@ -11,13 +11,11 @@ const MAX_SKILL_NAME_LENGTH: usize = 64;
 
 /// Pre-compiled regex patterns for sanitization.
 /// Using LazyLock for thread-safe, one-time initialization.
-static MULTIPLE_HYPHENS: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"-+").expect("Failed to compile multiple hyphens regex")
-});
+static MULTIPLE_HYPHENS: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"-+").expect("Failed to compile multiple hyphens regex"));
 
-static INVALID_CHARS: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"[^a-z0-9-]").expect("Failed to compile invalid chars regex")
-});
+static INVALID_CHARS: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"[^a-z0-9-]").expect("Failed to compile invalid chars regex"));
 
 static LEADING_TRAILING_HYPHENS: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^-+|-+$").expect("Failed to compile leading/trailing hyphens regex")
@@ -53,10 +51,7 @@ pub fn sanitize_skill_name(path: &str) -> String {
     let decoded = urlencoding_decode(path).to_lowercase();
 
     // Step 2: Replace path separators and underscores with hyphens
-    let with_hyphens = decoded
-        .replace('/', "-")
-        .replace('\\', "-")
-        .replace('_', "-");
+    let with_hyphens = decoded.replace(['/', '\\', '_'], "-");
 
     // Step 3: Remove file extensions (e.g., .html, .htm, .md)
     let without_extension = remove_file_extension(&with_hyphens);
@@ -76,7 +71,9 @@ pub fn sanitize_skill_name(path: &str) -> String {
 
 /// Removes common file extensions from a string.
 fn remove_file_extension(s: &str) -> String {
-    let extensions = [".html", ".htm", ".md", ".txt", ".php", ".asp", ".aspx", ".jsp"];
+    let extensions = [
+        ".html", ".htm", ".md", ".txt", ".php", ".asp", ".aspx", ".jsp",
+    ];
     let mut result = s.to_string();
     for ext in extensions {
         if result.ends_with(ext) {
@@ -133,7 +130,11 @@ pub fn extract_url_path(url_str: &str) -> String {
         Ok(url) => {
             let path = url.path().to_string();
             // Return "/" if path is empty
-            if path.is_empty() { "/".to_string() } else { path }
+            if path.is_empty() {
+                "/".to_string()
+            } else {
+                path
+            }
         }
         Err(_) => {
             // If URL parsing fails, try to extract path manually
@@ -177,10 +178,10 @@ pub fn truncate_description(description: &str, max_chars: usize) -> String {
     let mut best_end = 0;
 
     for ending in sentence_endings {
-        if let Some(pos) = truncated.rfind(ending) {
-            if pos > best_end {
-                best_end = pos + 1; // Include the punctuation
-            }
+        if let Some(pos) = truncated.rfind(ending)
+            && pos > best_end
+        {
+            best_end = pos + 1; // Include the punctuation
         }
     }
 
@@ -219,10 +220,16 @@ pub fn parse_url_pattern(url: &str) -> (String, Option<String>) {
     // Check if the URL contains a glob pattern
     if url.contains('*') || url.contains('?') {
         // Find where the pattern starts
-        let pattern_start = url.find('*').unwrap_or(url.len()).min(url.find('?').unwrap_or(url.len()));
+        let pattern_start = url
+            .find('*')
+            .unwrap_or(url.len())
+            .min(url.find('?').unwrap_or(url.len()));
 
         // Find the last slash before the pattern
-        let base_end = url[..pattern_start].rfind('/').map(|i| i + 1).unwrap_or(pattern_start);
+        let base_end = url[..pattern_start]
+            .rfind('/')
+            .map(|i| i + 1)
+            .unwrap_or(pattern_start);
 
         let base_url = url[..base_end].to_string();
 

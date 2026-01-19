@@ -19,7 +19,7 @@ use anyhow::{Context, Result};
 use chrono::Utc;
 use htmd::HtmlToMarkdown;
 use scraper::{Html, Selector};
-use std::path::PathBuf;
+use std::path::Path;
 use tracing::{debug, warn};
 
 /// Maximum description length in frontmatter.
@@ -147,13 +147,10 @@ impl Processor {
             .unwrap_or_else(|| "Untitled".to_string());
 
         // Extract meta description
-        let description = self
-            .extract_meta_description(document)
-            .unwrap_or_else(|| {
-                // Fall back to first paragraph if no meta description
-                self.extract_first_paragraph(document)
-                    .unwrap_or_default()
-            });
+        let description = self.extract_meta_description(document).unwrap_or_else(|| {
+            // Fall back to first paragraph if no meta description
+            self.extract_first_paragraph(document).unwrap_or_default()
+        });
 
         // Generate skill name from URL path
         let url_path = extract_url_path(url);
@@ -181,24 +178,24 @@ impl Processor {
     /// Extracts the page title.
     fn extract_title(&self, document: &Html) -> Option<String> {
         // Try <title> first
-        if let Ok(selector) = Selector::parse("title") {
-            if let Some(element) = document.select(&selector).next() {
-                let title: String = element.text().collect();
-                let title = title.trim();
-                if !title.is_empty() {
-                    return Some(title.to_string());
-                }
+        if let Ok(selector) = Selector::parse("title")
+            && let Some(element) = document.select(&selector).next()
+        {
+            let title: String = element.text().collect();
+            let title = title.trim();
+            if !title.is_empty() {
+                return Some(title.to_string());
             }
         }
 
         // Fall back to first <h1>
-        if let Ok(selector) = Selector::parse("h1") {
-            if let Some(element) = document.select(&selector).next() {
-                let title: String = element.text().collect();
-                let title = title.trim();
-                if !title.is_empty() {
-                    return Some(title.to_string());
-                }
+        if let Ok(selector) = Selector::parse("h1")
+            && let Some(element) = document.select(&selector).next()
+        {
+            let title: String = element.text().collect();
+            let title = title.trim();
+            if !title.is_empty() {
+                return Some(title.to_string());
             }
         }
 
@@ -207,26 +204,24 @@ impl Processor {
 
     /// Extracts the meta description.
     fn extract_meta_description(&self, document: &Html) -> Option<String> {
-        if let Ok(selector) = Selector::parse("meta[name='description']") {
-            if let Some(element) = document.select(&selector).next() {
-                if let Some(content) = element.value().attr("content") {
-                    let content = content.trim();
-                    if !content.is_empty() {
-                        return Some(content.to_string());
-                    }
-                }
+        if let Ok(selector) = Selector::parse("meta[name='description']")
+            && let Some(element) = document.select(&selector).next()
+            && let Some(content) = element.value().attr("content")
+        {
+            let content = content.trim();
+            if !content.is_empty() {
+                return Some(content.to_string());
             }
         }
 
         // Try og:description as fallback
-        if let Ok(selector) = Selector::parse("meta[property='og:description']") {
-            if let Some(element) = document.select(&selector).next() {
-                if let Some(content) = element.value().attr("content") {
-                    let content = content.trim();
-                    if !content.is_empty() {
-                        return Some(content.to_string());
-                    }
-                }
+        if let Ok(selector) = Selector::parse("meta[property='og:description']")
+            && let Some(element) = document.select(&selector).next()
+            && let Some(content) = element.value().attr("content")
+        {
+            let content = content.trim();
+            if !content.is_empty() {
+                return Some(content.to_string());
             }
         }
 
@@ -293,7 +288,7 @@ impl Processor {
             r"(?is)<canvas[^>]*>.*?</canvas>",
             r"(?is)<video[^>]*>.*?</video>",
             r"(?is)<audio[^>]*>.*?</audio>",
-            r"(?is)<form[^>]*>.*?</form>",  // Remove forms (search, feedback, etc.)
+            r"(?is)<form[^>]*>.*?</form>", // Remove forms (search, feedback, etc.)
         ];
 
         for pattern in noise_patterns {
@@ -339,7 +334,9 @@ impl Processor {
 
         // Remove skip links (often standalone anchor tags)
         // Using r##""## because the pattern contains # character
-        if let Ok(skip_link_re) = regex::Regex::new(r##"(?is)<a[^>]+href="#[^"]*"[^>]*>Skip[^<]*</a>"##) {
+        if let Ok(skip_link_re) =
+            regex::Regex::new(r##"(?is)<a[^>]+href="#[^"]*"[^>]*>Skip[^<]*</a>"##)
+        {
             cleaned = skip_link_re.replace_all(&cleaned, "").to_string();
         }
 
@@ -620,15 +617,15 @@ metadata:
     pub async fn write_to_disk(
         &self,
         processed: &ProcessedPage,
-        output_dir: &PathBuf,
-    ) -> Result<PathBuf> {
+        output_dir: &Path,
+    ) -> Result<std::path::PathBuf> {
         use fs_err::tokio as fs;
 
         // Create skill directory
         let skill_dir = output_dir.join(&processed.metadata.skill_name);
-        fs::create_dir_all(&skill_dir)
-            .await
-            .with_context(|| format!("Failed to create skill directory: {}", skill_dir.display()))?;
+        fs::create_dir_all(&skill_dir).await.with_context(|| {
+            format!("Failed to create skill directory: {}", skill_dir.display())
+        })?;
 
         // Write SKILL.md with full content
         let skill_md_path = skill_dir.join("SKILL.md");
@@ -727,7 +724,8 @@ mod tests {
             processed_at: "2024-01-15T10:30:00Z".to_string(),
         };
 
-        let markdown_content = "## Installation Steps\n\n1. Download Flutter\n2. Extract the archive\n3. Add to PATH";
+        let markdown_content =
+            "## Installation Steps\n\n1. Download Flutter\n2. Extract the archive\n3. Add to PATH";
         let skill_md = processor.generate_skill_md(&metadata, markdown_content);
 
         // Check frontmatter
