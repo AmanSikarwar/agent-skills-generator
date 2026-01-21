@@ -45,7 +45,7 @@ pub mod utils;
 
 use anyhow::{Context, Result};
 use cli::{Cli, Commands, DEFAULT_CONFIG};
-use config::{Action, Config, Rule};
+use config::{Action, Config, Rule, SkillsScope};
 use crawler::{Crawler, clean_output_dir};
 use processor::Processor;
 use std::io::{self, Write};
@@ -92,6 +92,8 @@ async fn run_crawl(cli: &Cli, args: &cli::CrawlArgs) -> Result<()> {
     let mut config = load_config(&cli.config)?;
 
     // Apply command-line overrides
+    apply_cli_overrides(&mut config, cli);
+
     if let Some(delay) = args.delay {
         config.delay_ms = delay;
     }
@@ -102,8 +104,12 @@ async fn run_crawl(cli: &Cli, args: &cli::CrawlArgs) -> Result<()> {
         config.subdomains = true;
     }
 
-    // Determine output directory
-    let output_dir = cli.effective_output(&config.output);
+    // Determine output directory (CLI --output overrides resolve_output_path)
+    let output_dir = if let Some(ref output) = cli.output {
+        output.clone()
+    } else {
+        config.resolve_output_path()
+    };
 
     info!("Output directory: {}", output_dir.display());
 
@@ -199,8 +205,14 @@ async fn run_crawl(cli: &Cli, args: &cli::CrawlArgs) -> Result<()> {
 /// Run the clean command.
 async fn run_clean(cli: &Cli, args: &cli::CleanArgs) -> Result<()> {
     // Load configuration to get output directory
-    let config = load_config_or_default(&cli.config);
-    let output_dir = cli.effective_output(&config.output);
+    let mut config = load_config_or_default(&cli.config);
+    apply_cli_overrides(&mut config, cli);
+
+    let output_dir = if let Some(ref output) = cli.output {
+        output.clone()
+    } else {
+        config.resolve_output_path()
+    };
 
     if !output_dir.exists() {
         info!("Output directory does not exist: {}", output_dir.display());
@@ -233,13 +245,16 @@ async fn run_clean(cli: &Cli, args: &cli::CleanArgs) -> Result<()> {
 
 /// Run the validate command.
 fn run_validate(cli: &Cli, args: &cli::ValidateArgs) -> Result<()> {
-    let config = load_config(&cli.config)?;
+    let mut config = load_config(&cli.config)?;
+    apply_cli_overrides(&mut config, cli);
 
     info!("Configuration is valid!");
 
     if args.show {
         println!("\n--- Parsed Configuration ---");
-        println!("Output: {}", config.output.display());
+        println!("Target: {}", config.target);
+        println!("Scope: {}", config.scope);
+        println!("Output: {}", config.resolve_output_path().display());
         println!("Flat: {}", config.flat);
         println!("Delay: {}ms", config.delay_ms);
         println!("Max Depth: {}", config.max_depth);
@@ -263,8 +278,14 @@ fn run_validate(cli: &Cli, args: &cli::ValidateArgs) -> Result<()> {
 
 /// Run the single command - process a single URL.
 async fn run_single(cli: &Cli, args: &cli::SingleArgs) -> Result<()> {
-    let config = load_config_or_default(&cli.config);
-    let output_dir = cli.effective_output(&config.output);
+    let mut config = load_config_or_default(&cli.config);
+    apply_cli_overrides(&mut config, cli);
+
+    let output_dir = if let Some(ref output) = cli.output {
+        output.clone()
+    } else {
+        config.resolve_output_path()
+    };
 
     info!("Processing single URL: {}", args.url);
 
@@ -352,5 +373,22 @@ fn load_config_or_default(path: &std::path::Path) -> Config {
         }
     } else {
         Config::default()
+    }
+}
+
+/// Apply CLI overrides to configuration.
+///
+/// This applies the following CLI flags to the configuration:
+/// - `--target`: Sets the target IDE/agent
+/// - `--user`: Sets the scope to user-level
+fn apply_cli_overrides(config: &mut Config, cli: &Cli) {
+    // Apply target override
+    if let Some(target) = cli.target {
+        config.target = target;
+    }
+
+    // Apply user-level scope override
+    if cli.user_level {
+        config.scope = SkillsScope::User;
     }
 }

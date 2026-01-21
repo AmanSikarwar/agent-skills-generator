@@ -20,6 +20,131 @@ const DEFAULT_MAX_DEPTH: usize = 25;
 /// Default request timeout in seconds.
 const DEFAULT_REQUEST_TIMEOUT_SECS: u64 = 30;
 
+/// Target IDE/agent for skills generation.
+///
+/// Each target has specific directory conventions for project-scoped
+/// and user-scoped skills.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SkillsTarget {
+    /// GitHub Copilot: `.github/skills/` (project), `~/.copilot/skills/` (user)
+    #[serde(alias = "copilot")]
+    GithubCopilot,
+    /// Claude Code: `.claude/skills/` (project), `~/.claude/skills/` (user)
+    #[serde(alias = "claude")]
+    ClaudeCode,
+    /// Cursor: `.cursor/skills/` (project), `~/.cursor/skills/` (user)
+    Cursor,
+    /// Google Antigravity: `.gemini/skills/` (project), `~/.gemini/skills/` (user)
+    #[serde(alias = "gemini")]
+    Antigravity,
+    /// OpenAI Codex: `.codex/skills/` (project), `~/.codex/skills/` (user)
+    #[serde(alias = "codex")]
+    OpenAICodex,
+    /// OpenCode: `.opencode/skills/` (project), `~/.config/opencode/skills/` (user)
+    OpenCode,
+    /// Custom output path (uses the `output` field directly)
+    #[default]
+    Custom,
+}
+
+impl SkillsTarget {
+    /// Returns the project-scoped output directory for this target.
+    pub fn project_dir(&self) -> &'static str {
+        match self {
+            Self::GithubCopilot => ".github/skills",
+            Self::ClaudeCode => ".claude/skills",
+            Self::Cursor => ".cursor/skills",
+            Self::Antigravity => ".gemini/skills",
+            Self::OpenAICodex => ".codex/skills",
+            Self::OpenCode => ".opencode/skills",
+            Self::Custom => DEFAULT_OUTPUT_DIR,
+        }
+    }
+
+    /// Returns the user-scoped (global) output directory for this target.
+    /// The path is relative to the user's home directory.
+    pub fn user_dir(&self) -> &'static str {
+        match self {
+            Self::GithubCopilot => ".copilot/skills",
+            Self::ClaudeCode => ".claude/skills",
+            Self::Cursor => ".cursor/skills",
+            Self::Antigravity => ".gemini/skills",
+            Self::OpenAICodex => ".codex/skills",
+            Self::OpenCode => ".config/opencode/skills",
+            Self::Custom => ".agent/skills",
+        }
+    }
+
+    /// Returns all supported target names for CLI help.
+    pub fn all_names() -> &'static [&'static str] {
+        &[
+            "github-copilot",
+            "claude-code",
+            "cursor",
+            "antigravity",
+            "openai-codex",
+            "opencode",
+            "custom",
+        ]
+    }
+}
+
+impl std::fmt::Display for SkillsTarget {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::GithubCopilot => write!(f, "github-copilot"),
+            Self::ClaudeCode => write!(f, "claude-code"),
+            Self::Cursor => write!(f, "cursor"),
+            Self::Antigravity => write!(f, "antigravity"),
+            Self::OpenAICodex => write!(f, "openai-codex"),
+            Self::OpenCode => write!(f, "opencode"),
+            Self::Custom => write!(f, "custom"),
+        }
+    }
+}
+
+impl std::str::FromStr for SkillsTarget {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "github-copilot" | "copilot" => Ok(Self::GithubCopilot),
+            "claude-code" | "claude" => Ok(Self::ClaudeCode),
+            "cursor" => Ok(Self::Cursor),
+            "antigravity" | "gemini" => Ok(Self::Antigravity),
+            "openai-codex" | "codex" | "openai" => Ok(Self::OpenAICodex),
+            "opencode" | "open-code" => Ok(Self::OpenCode),
+            "custom" => Ok(Self::Custom),
+            _ => Err(format!(
+                "Unknown target '{}'. Valid targets: {}",
+                s,
+                SkillsTarget::all_names().join(", ")
+            )),
+        }
+    }
+}
+
+/// Scope for skills installation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SkillsScope {
+    /// Project-level skills (stored in project directory)
+    #[default]
+    Project,
+    /// User-level skills (stored in user home directory)
+    User,
+}
+
+impl std::fmt::Display for SkillsScope {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Project => write!(f, "project"),
+            Self::User => write!(f, "user"),
+        }
+    }
+}
+
 /// Root configuration structure.
 ///
 /// Maps to the `skills.yaml` file format:
@@ -80,6 +205,15 @@ pub struct Config {
     /// Concurrency limit for parallel page processing.
     #[serde(default = "default_concurrency")]
     pub concurrency: usize,
+
+    /// Target IDE/agent for skills generation.
+    /// When set to a specific target, the output path is determined automatically.
+    #[serde(default)]
+    pub target: SkillsTarget,
+
+    /// Scope for skills installation (project-level or user-level).
+    #[serde(default)]
+    pub scope: SkillsScope,
 }
 
 fn default_output() -> PathBuf {
@@ -149,6 +283,8 @@ impl Default for Config {
             rules: Vec::new(),
             remove_selectors: default_remove_selectors(),
             concurrency: default_concurrency(),
+            target: SkillsTarget::default(),
+            scope: SkillsScope::default(),
         }
     }
 }
@@ -235,6 +371,35 @@ impl Config {
     pub fn has_allow_rules(&self) -> bool {
         self.rules.iter().any(|r| matches!(r.action, Action::Allow))
     }
+
+    /// Resolves the output path based on the target and scope.
+    ///
+    /// - For `SkillsTarget::Custom`, returns the `output` field as-is.
+    /// - For other targets, returns the appropriate project or user directory.
+    /// - For user scope, expands `~` to the user's home directory.
+    pub fn resolve_output_path(&self) -> PathBuf {
+        match self.target {
+            SkillsTarget::Custom => self.output.clone(),
+            _ => match self.scope {
+                SkillsScope::Project => PathBuf::from(self.target.project_dir()),
+                SkillsScope::User => {
+                    if let Some(home) = dirs_home() {
+                        home.join(self.target.user_dir())
+                    } else {
+                        // Fallback to project directory if home not found
+                        PathBuf::from(self.target.project_dir())
+                    }
+                }
+            },
+        }
+    }
+}
+
+/// Returns the user's home directory.
+fn dirs_home() -> Option<PathBuf> {
+    std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("USERPROFILE").map(PathBuf::from))
 }
 
 /// A URL filtering rule.
@@ -486,5 +651,77 @@ rules:
         assert!(config.should_crawl("https://docs.flutter.dev/ui/widgets/buttons"));
         assert!(!config.should_crawl("https://docs.flutter.dev/cookbook/"));
         assert!(!config.should_crawl("https://docs.flutter.dev/"));
+    }
+
+    #[test]
+    fn test_skills_target_default() {
+        let config = Config::default();
+        assert_eq!(config.target, SkillsTarget::Custom);
+        assert_eq!(config.scope, SkillsScope::Project);
+    }
+
+    #[test]
+    fn test_skills_target_project_dirs() {
+        assert_eq!(SkillsTarget::GithubCopilot.project_dir(), ".github/skills");
+        assert_eq!(SkillsTarget::ClaudeCode.project_dir(), ".claude/skills");
+        assert_eq!(SkillsTarget::Cursor.project_dir(), ".cursor/skills");
+        assert_eq!(SkillsTarget::Antigravity.project_dir(), ".gemini/skills");
+        assert_eq!(SkillsTarget::OpenAICodex.project_dir(), ".codex/skills");
+        assert_eq!(SkillsTarget::OpenCode.project_dir(), ".opencode/skills");
+        assert_eq!(SkillsTarget::Custom.project_dir(), ".agent/skills");
+    }
+
+    #[test]
+    fn test_skills_target_user_dirs() {
+        assert_eq!(SkillsTarget::GithubCopilot.user_dir(), ".copilot/skills");
+        assert_eq!(SkillsTarget::ClaudeCode.user_dir(), ".claude/skills");
+        assert_eq!(SkillsTarget::Cursor.user_dir(), ".cursor/skills");
+        assert_eq!(SkillsTarget::Antigravity.user_dir(), ".gemini/skills");
+        assert_eq!(SkillsTarget::OpenAICodex.user_dir(), ".codex/skills");
+        assert_eq!(SkillsTarget::OpenCode.user_dir(), ".config/opencode/skills");
+        assert_eq!(SkillsTarget::Custom.user_dir(), ".agent/skills");
+    }
+
+    #[test]
+    fn test_skills_target_from_str() {
+        assert_eq!("cursor".parse::<SkillsTarget>().unwrap(), SkillsTarget::Cursor);
+        assert_eq!("claude-code".parse::<SkillsTarget>().unwrap(), SkillsTarget::ClaudeCode);
+        assert_eq!("claude".parse::<SkillsTarget>().unwrap(), SkillsTarget::ClaudeCode);
+        assert_eq!("github-copilot".parse::<SkillsTarget>().unwrap(), SkillsTarget::GithubCopilot);
+        assert_eq!("copilot".parse::<SkillsTarget>().unwrap(), SkillsTarget::GithubCopilot);
+        assert_eq!("antigravity".parse::<SkillsTarget>().unwrap(), SkillsTarget::Antigravity);
+        assert_eq!("gemini".parse::<SkillsTarget>().unwrap(), SkillsTarget::Antigravity);
+        assert_eq!("openai-codex".parse::<SkillsTarget>().unwrap(), SkillsTarget::OpenAICodex);
+        assert_eq!("codex".parse::<SkillsTarget>().unwrap(), SkillsTarget::OpenAICodex);
+        assert_eq!("opencode".parse::<SkillsTarget>().unwrap(), SkillsTarget::OpenCode);
+        assert!("invalid".parse::<SkillsTarget>().is_err());
+    }
+
+    #[test]
+    fn test_config_yaml_with_target() {
+        let yaml = r#"
+target: cursor
+scope: user
+output: ./custom-output
+"#;
+        let config = Config::from_yaml(yaml).unwrap();
+        assert_eq!(config.target, SkillsTarget::Cursor);
+        assert_eq!(config.scope, SkillsScope::User);
+    }
+
+    #[test]
+    fn test_resolve_output_path_custom() {
+        let mut config = Config::default();
+        config.target = SkillsTarget::Custom;
+        config.output = PathBuf::from("./my-skills");
+        assert_eq!(config.resolve_output_path(), PathBuf::from("./my-skills"));
+    }
+
+    #[test]
+    fn test_resolve_output_path_project() {
+        let mut config = Config::default();
+        config.target = SkillsTarget::Cursor;
+        config.scope = SkillsScope::Project;
+        assert_eq!(config.resolve_output_path(), PathBuf::from(".cursor/skills"));
     }
 }

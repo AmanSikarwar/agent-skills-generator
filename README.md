@@ -208,6 +208,46 @@ agent-skills-generator crawl https://docs.example.com --max-pages 50
 agent-skills-generator crawl https://docs.example.com --dry-run
 ```
 
+### Multi-IDE Target Support
+
+Generate skills for specific AI coding assistants:
+
+```bash
+# Generate for Cursor (outputs to .cursor/skills/)
+agent-skills-generator --target cursor crawl https://docs.example.com
+
+# Generate for Claude Code (outputs to .claude/skills/)
+agent-skills-generator --target claude-code crawl https://docs.example.com
+
+# Generate for VS Code Copilot (outputs to .github/skills/)
+agent-skills-generator --target github-copilot crawl https://docs.example.com
+
+# Install at user level (~/.cursor/skills/)
+agent-skills-generator --target cursor --user crawl https://docs.example.com
+```
+
+**Supported Targets:**
+
+| Target | Project Directory | User Directory |
+|--------|-------------------|----------------|
+| `github-copilot` | `.github/skills/` | `~/.copilot/skills/` |
+| `claude-code` | `.claude/skills/` | `~/.claude/skills/` |
+| `cursor` | `.cursor/skills/` | `~/.cursor/skills/` |
+| `antigravity` | `.gemini/skills/` | `~/.gemini/skills/` |
+| `openai-codex` | `.codex/skills/` | `~/.codex/skills/` |
+| `opencode` | `.opencode/skills/` | `~/.config/opencode/skills/` |
+| `custom` | Uses `output` field | Uses `output` field |
+
+You can also set the target in `skills.yaml`:
+
+```yaml
+# Target IDE/agent
+target: cursor
+
+# Scope: "project" or "user"
+scope: project
+```
+
 ---
 
 ## Examples

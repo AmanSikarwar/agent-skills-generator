@@ -7,6 +7,7 @@
 //! - `clean` - Remove all generated skill files
 //! - `validate` - Validate the configuration file
 
+use crate::config::SkillsTarget;
 use clap::{Args, Parser, Subcommand};
 use std::path::{Path, PathBuf};
 
@@ -40,6 +41,25 @@ pub struct Cli {
     #[arg(short, long, global = true, env = "SKILLS_OUTPUT")]
     pub output: Option<PathBuf>,
 
+    /// Target IDE/agent for skills generation.
+    ///
+    /// Supported targets: github-copilot, claude-code, cursor, antigravity, openai-codex, opencode, custom
+    #[arg(
+        short,
+        long,
+        global = true,
+        env = "SKILLS_TARGET",
+        value_parser = parse_skills_target,
+        help = "Target IDE/agent (github-copilot, claude-code, cursor, antigravity, openai-codex, opencode)"
+    )]
+    pub target: Option<SkillsTarget>,
+
+    /// Install skills at user level (global) instead of project level.
+    ///
+    /// When set, skills are installed to the user's home directory (e.g., ~/.cursor/skills/).
+    #[arg(short = 'u', long = "user", global = true, env = "SKILLS_USER")]
+    pub user_level: bool,
+
     /// Enable verbose logging.
     #[arg(short, long, global = true, action = clap::ArgAction::Count)]
     pub verbose: u8,
@@ -51,6 +71,11 @@ pub struct Cli {
     /// The subcommand to run.
     #[command(subcommand)]
     pub command: Commands,
+}
+
+/// Parse a SkillsTarget from a string.
+fn parse_skills_target(s: &str) -> Result<SkillsTarget, String> {
+    s.parse()
 }
 
 /// Available subcommands.
@@ -205,7 +230,17 @@ impl Cli {
 pub const DEFAULT_CONFIG: &str = r##"# Agent Skills Generator Configuration
 # See https://github.com/agentskills/agentskills for documentation
 
-# Output directory for generated skills
+# Target IDE/agent for skills generation
+# Supported targets: github-copilot, claude-code, cursor, antigravity, openai-codex, opencode, custom
+# When not set or "custom", uses the "output" field below
+target: custom
+
+# Scope for skills installation
+# - project: Install to project directory (e.g., .cursor/skills/)
+# - user: Install to user home directory (e.g., ~/.cursor/skills/)
+scope: project
+
+# Output directory for generated skills (only used when target is "custom")
 output: .agent/skills
 
 # Create flat directory structure (no subdirectories)
