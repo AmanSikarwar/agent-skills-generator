@@ -335,7 +335,26 @@ fn run_init(args: &cli::InitArgs) -> Result<()> {
         );
     }
 
-    fs_err::write(&args.path, DEFAULT_CONFIG).with_context(|| {
+    // If --no-interactive, use default config
+    if args.no_interactive {
+        fs_err::write(&args.path, DEFAULT_CONFIG).with_context(|| {
+            format!(
+                "Failed to write configuration file: {}",
+                args.path.display()
+            )
+        })?;
+
+        info!("Created configuration file: {}", args.path.display());
+        info!("Edit this file to customize crawling behavior, then run:");
+        info!("  agent-skills-generator crawl <URL>");
+
+        return Ok(());
+    }
+
+    // Interactive mode
+    let config_content = run_interactive_init()?;
+
+    fs_err::write(&args.path, &config_content).with_context(|| {
         format!(
             "Failed to write configuration file: {}",
             args.path.display()
@@ -343,10 +362,155 @@ fn run_init(args: &cli::InitArgs) -> Result<()> {
     })?;
 
     info!("Created configuration file: {}", args.path.display());
-    info!("Edit this file to customize crawling behavior, then run:");
+    info!("Run the following command to start crawling:");
     info!("  agent-skills-generator crawl <URL>");
 
     Ok(())
+}
+
+/// Run interactive initialization prompts and return the generated YAML config.
+fn run_interactive_init() -> Result<String> {
+    use config::{SkillsScope, SkillsTarget};
+    use inquire::{Select, Text};
+
+    // Target IDE selection
+    let target_options = [
+        ("Custom (specify output path)", SkillsTarget::Custom),
+        ("GitHub Copilot", SkillsTarget::GithubCopilot),
+        ("Claude Code", SkillsTarget::ClaudeCode),
+        ("Cursor", SkillsTarget::Cursor),
+        ("Antigravity (Gemini)", SkillsTarget::Antigravity),
+        ("OpenAI Codex", SkillsTarget::OpenAICodex),
+        ("OpenCode", SkillsTarget::OpenCode),
+    ];
+
+    let target_names: Vec<&str> = target_options.iter().map(|(name, _)| *name).collect();
+    let target_idx = Select::new("Select target IDE/agent:", target_names)
+        .with_help_message("Choose where your skills will be installed")
+        .prompt()
+        .map_err(|e| anyhow::anyhow!("Failed to get target selection: {}", e))?;
+
+    let target = target_options
+        .iter()
+        .find(|(name, _)| *name == target_idx)
+        .map(|(_, t)| *t)
+        .unwrap_or(SkillsTarget::Custom);
+
+    // Scope selection
+    let scope_options = [
+        (
+            "Project (install to current directory)",
+            SkillsScope::Project,
+        ),
+        ("User (install to home directory)", SkillsScope::User),
+    ];
+
+    let scope_names: Vec<&str> = scope_options.iter().map(|(name, _)| *name).collect();
+    let scope_idx = Select::new("Install skills at project or user level?", scope_names)
+        .with_help_message("Project-level is recommended for team collaboration")
+        .prompt()
+        .map_err(|e| anyhow::anyhow!("Failed to get scope selection: {}", e))?;
+
+    let scope = scope_options
+        .iter()
+        .find(|(name, _)| *name == scope_idx)
+        .map(|(_, s)| *s)
+        .unwrap_or(SkillsScope::Project);
+
+    // Output path (only for custom target)
+    let output = if matches!(target, SkillsTarget::Custom) {
+        Text::new("Output directory:")
+            .with_default(".agent/skills")
+            .with_help_message("Where to store generated skill files")
+            .prompt()
+            .map_err(|e| anyhow::anyhow!("Failed to get output path: {}", e))?
+    } else {
+        ".agent/skills".to_string()
+    };
+
+    // Crawl settings
+    let delay_ms = Text::new("Request delay in milliseconds:")
+        .with_default("100")
+        .with_help_message("Delay between requests for polite crawling")
+        .prompt()
+        .map_err(|e| anyhow::anyhow!("Failed to get delay: {}", e))?
+        .parse::<u64>()
+        .unwrap_or(100);
+
+    let max_depth = Text::new("Maximum crawl depth:")
+        .with_default("25")
+        .with_help_message("How deep to follow links from the starting URL")
+        .prompt()
+        .map_err(|e| anyhow::anyhow!("Failed to get max depth: {}", e))?
+        .parse::<usize>()
+        .unwrap_or(25);
+
+    let concurrency = Text::new("Concurrency limit:")
+        .with_default("4")
+        .with_help_message("Number of parallel requests")
+        .prompt()
+        .map_err(|e| anyhow::anyhow!("Failed to get concurrency: {}", e))?
+        .parse::<usize>()
+        .unwrap_or(4);
+
+    // Generate YAML configuration
+    let config_yaml = format!(
+        r##"# Agent Skills Generator Configuration
+# See https://github.com/agentskills/agentskills for documentation
+
+# Target IDE/agent for skills generation
+# Supported targets: github-copilot, claude-code, cursor, antigravity, openai-codex, opencode, custom
+target: {}
+
+# Scope for skills installation
+# - project: Install to project directory (e.g., .cursor/skills/)
+# - user: Install to user home directory (e.g., ~/.cursor/skills/)
+scope: {}
+
+# Output directory for generated skills (only used when target is "custom")
+output: {}
+
+# Create flat directory structure (no subdirectories)
+flat: false
+
+# Delay between requests in milliseconds (polite crawling)
+delay_ms: {}
+
+# Maximum crawl depth
+max_depth: {}
+
+# Request timeout in seconds
+request_timeout_secs: 30
+
+# Respect robots.txt
+respect_robots_txt: true
+
+# Allow subdomains
+subdomains: false
+
+# Concurrency limit for parallel page processing
+concurrency: {}
+
+# URL filtering rules (evaluated in order)
+rules:
+  # Example: Allow only documentation pages
+  # - url: "*/docs/*"
+  #   action: allow
+
+  # Example: Ignore API internals
+  # - url: "*/api/internal/*"
+  #   action: ignore
+
+# CSS selectors for elements to remove from content
+# These are already included by default, add more if needed:
+# remove_selectors:
+#   - ".custom-sidebar"
+#   - "#ad-container"
+"##,
+        target, scope, output, delay_ms, max_depth, concurrency
+    );
+
+    Ok(config_yaml)
 }
 
 /// Load configuration from file.

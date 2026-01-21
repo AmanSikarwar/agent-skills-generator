@@ -195,6 +195,10 @@ pub struct InitArgs {
     /// Path where to create the configuration file.
     #[arg(short, long, default_value = "skills.yaml")]
     pub path: PathBuf,
+
+    /// Skip interactive prompts and create default config.
+    #[arg(long)]
+    pub no_interactive: bool,
 }
 
 impl Cli {

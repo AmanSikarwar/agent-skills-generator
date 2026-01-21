@@ -90,7 +90,17 @@ Download pre-built binaries from the [Releases](https://github.com/AmanSikarwar/
 agent-skills-generator init
 ```
 
-This creates a `skills.yaml` configuration file.
+This launches an **interactive wizard** that guides you through setting up:
+- Target IDE/agent (Cursor, Claude Code, GitHub Copilot, etc.)
+- Installation scope (project or user level)
+- Crawl settings (delay, depth, concurrency)
+
+The wizard creates a `skills.yaml` configuration file.
+
+> **Tip:** Use `--no-interactive` to skip prompts and create a default config:
+> ```bash
+> agent-skills-generator init --no-interactive
+> ```
 
 ### 2. Crawl a Website
 
@@ -184,7 +194,8 @@ agent-skills-generator validate --show
 | `single <url>` | Process a single URL |
 | `clean` | Remove generated skill files |
 | `validate` | Validate configuration file |
-| `init` | Create default configuration |
+| `init` | Create configuration (interactive wizard) |
+| `init --no-interactive` | Create default configuration |
 
 ### Common Options
 

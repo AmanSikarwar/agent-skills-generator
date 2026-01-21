@@ -684,16 +684,46 @@ rules:
 
     #[test]
     fn test_skills_target_from_str() {
-        assert_eq!("cursor".parse::<SkillsTarget>().unwrap(), SkillsTarget::Cursor);
-        assert_eq!("claude-code".parse::<SkillsTarget>().unwrap(), SkillsTarget::ClaudeCode);
-        assert_eq!("claude".parse::<SkillsTarget>().unwrap(), SkillsTarget::ClaudeCode);
-        assert_eq!("github-copilot".parse::<SkillsTarget>().unwrap(), SkillsTarget::GithubCopilot);
-        assert_eq!("copilot".parse::<SkillsTarget>().unwrap(), SkillsTarget::GithubCopilot);
-        assert_eq!("antigravity".parse::<SkillsTarget>().unwrap(), SkillsTarget::Antigravity);
-        assert_eq!("gemini".parse::<SkillsTarget>().unwrap(), SkillsTarget::Antigravity);
-        assert_eq!("openai-codex".parse::<SkillsTarget>().unwrap(), SkillsTarget::OpenAICodex);
-        assert_eq!("codex".parse::<SkillsTarget>().unwrap(), SkillsTarget::OpenAICodex);
-        assert_eq!("opencode".parse::<SkillsTarget>().unwrap(), SkillsTarget::OpenCode);
+        assert_eq!(
+            "cursor".parse::<SkillsTarget>().unwrap(),
+            SkillsTarget::Cursor
+        );
+        assert_eq!(
+            "claude-code".parse::<SkillsTarget>().unwrap(),
+            SkillsTarget::ClaudeCode
+        );
+        assert_eq!(
+            "claude".parse::<SkillsTarget>().unwrap(),
+            SkillsTarget::ClaudeCode
+        );
+        assert_eq!(
+            "github-copilot".parse::<SkillsTarget>().unwrap(),
+            SkillsTarget::GithubCopilot
+        );
+        assert_eq!(
+            "copilot".parse::<SkillsTarget>().unwrap(),
+            SkillsTarget::GithubCopilot
+        );
+        assert_eq!(
+            "antigravity".parse::<SkillsTarget>().unwrap(),
+            SkillsTarget::Antigravity
+        );
+        assert_eq!(
+            "gemini".parse::<SkillsTarget>().unwrap(),
+            SkillsTarget::Antigravity
+        );
+        assert_eq!(
+            "openai-codex".parse::<SkillsTarget>().unwrap(),
+            SkillsTarget::OpenAICodex
+        );
+        assert_eq!(
+            "codex".parse::<SkillsTarget>().unwrap(),
+            SkillsTarget::OpenAICodex
+        );
+        assert_eq!(
+            "opencode".parse::<SkillsTarget>().unwrap(),
+            SkillsTarget::OpenCode
+        );
         assert!("invalid".parse::<SkillsTarget>().is_err());
     }
 
@@ -711,17 +741,24 @@ output: ./custom-output
 
     #[test]
     fn test_resolve_output_path_custom() {
-        let mut config = Config::default();
-        config.target = SkillsTarget::Custom;
-        config.output = PathBuf::from("./my-skills");
+        let config = Config {
+            target: SkillsTarget::Custom,
+            output: PathBuf::from("./my-skills"),
+            ..Default::default()
+        };
         assert_eq!(config.resolve_output_path(), PathBuf::from("./my-skills"));
     }
 
     #[test]
     fn test_resolve_output_path_project() {
-        let mut config = Config::default();
-        config.target = SkillsTarget::Cursor;
-        config.scope = SkillsScope::Project;
-        assert_eq!(config.resolve_output_path(), PathBuf::from(".cursor/skills"));
+        let config = Config {
+            target: SkillsTarget::Cursor,
+            scope: SkillsScope::Project,
+            ..Default::default()
+        };
+        assert_eq!(
+            config.resolve_output_path(),
+            PathBuf::from(".cursor/skills")
+        );
     }
 }
