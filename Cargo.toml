@@ -1,6 +1,6 @@
 [package]
 name = "agent-skills-generator"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 description = "A production-grade CLI tool for crawling websites and generating agent skills with the Reference Pattern"
 license = "MIT"
