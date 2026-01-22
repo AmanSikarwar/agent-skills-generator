@@ -123,7 +123,7 @@ async fn run_crawl(cli: &Cli, args: &cli::CrawlArgs) -> Result<()> {
 
         info!("Crawling: {} (base: {})", url_input, base_url);
 
-        // If URL contains a pattern, auto-generate rules
+        // Auto-generate rules to scope crawling to the initial URL path
         let crawl_config = if let Some(ref url_pattern) = pattern {
             let mut crawl_config = config.clone();
 
@@ -174,7 +174,47 @@ async fn run_crawl(cli: &Cli, args: &cli::CrawlArgs) -> Result<()> {
 
             crawl_config
         } else {
-            config.clone()
+            // No explicit pattern - auto-scope to the initial URL prefix
+            let mut crawl_config = config.clone();
+
+            // Only add scoping rules if we can extract the domain (valid URL)
+            if extract_domain_with_protocol(&base_url).is_some() {
+                // Normalize the base URL (ensure it ends with / for directory-style URLs)
+                let normalized_base = if base_url.ends_with('/') {
+                    base_url.clone()
+                } else {
+                    format!("{}/", base_url)
+                };
+
+                info!("Auto-scoping crawl to URL prefix: {}**", normalized_base);
+
+                // Allow the exact base URL
+                crawl_config.rules.insert(
+                    0,
+                    Rule {
+                        url: base_url.clone(),
+                        action: Action::Allow,
+                        content_type: None,
+                    },
+                );
+
+                // Allow all URLs under the base URL path
+                crawl_config.rules.insert(
+                    1,
+                    Rule {
+                        url: format!("{}**", normalized_base),
+                        action: Action::Allow,
+                        content_type: None,
+                    },
+                );
+
+                // Note: We don't add a domain-scope ignore rule here because:
+                // 1. The whitelist (allow rules) already restricts spider to matching URLs
+                // 2. should_crawl() returns false for URLs not matching any allow pattern
+                // 3. Adding a domain-scope ignore would conflict with user-defined ignore rules
+            }
+
+            crawl_config
         };
 
         if args.dry_run {

@@ -221,22 +221,26 @@ impl Crawler {
                 whitelist.into_iter().map(|s| s.into()).collect();
             // Use the proper method to set whitelist and configure it
             website.with_whitelist_url(Some(whitelist_vec));
-            // Compile the allowlist immediately so it's available for initial checks
-            website.configuration.configure_allowlist();
-        } else {
-            // Only use blacklist if we don't have a whitelist
-            // (whitelist takes precedence and restricts crawling sufficiently)
-            let blacklist = self.config.get_blacklist_patterns();
-            if !blacklist.is_empty() {
-                info!("Configuring blacklist with {} patterns", blacklist.len());
-                for pattern in &blacklist {
-                    debug!("Blacklist regex: {}", pattern);
-                }
-                let blacklist_vec: Vec<spider::compact_str::CompactString> =
-                    blacklist.into_iter().map(|s| s.into()).collect();
-                website.with_blacklist_url(Some(blacklist_vec));
-                website.configuration.configure_allowlist();
+        }
+
+        // Configure blacklist from ignore rules - these are checked even when whitelist exists
+        // This allows user-defined ignore patterns to exclude specific paths
+        let blacklist = self.config.get_blacklist_patterns();
+        if !blacklist.is_empty() {
+            info!("Configuring blacklist with {} patterns", blacklist.len());
+            for pattern in &blacklist {
+                info!("Blacklist regex: {}", pattern);
             }
+            let blacklist_vec: Vec<spider::compact_str::CompactString> =
+                blacklist.into_iter().map(|s| s.into()).collect();
+            website.with_blacklist_url(Some(blacklist_vec));
+        }
+
+        // Compile the allowlist/blocklist if any patterns were configured
+        if !self.config.get_whitelist_regex_patterns().is_empty()
+            || !self.config.get_blacklist_patterns().is_empty()
+        {
+            website.configuration.configure_allowlist();
         }
 
         // Only crawl HTML pages

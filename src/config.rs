@@ -518,20 +518,20 @@ impl UrlFilter {
 
     /// Checks if a URL should be crawled.
     ///
-    /// Logic (allow rules take precedence over ignore rules):
-    /// 1. If URL matches any "allow" pattern, return true
-    /// 2. If URL matches any "ignore" pattern, return false
+    /// Logic (ignore rules take precedence over allow rules):
+    /// 1. If URL matches any "ignore" pattern, return false
+    /// 2. If URL matches any "allow" pattern, return true
     /// 3. If we have "allow" rules but URL doesn't match, return false
     /// 4. If we have no "allow" rules and not ignored, return true (default allow)
     pub fn should_crawl(&self, url: &str) -> bool {
-        // First check allow patterns - these take precedence
-        if self.allow_set.is_match(url) {
-            return true;
-        }
-
-        // Then check ignore patterns
+        // First check ignore patterns - these take precedence
         if self.ignore_set.is_match(url) {
             return false;
+        }
+
+        // Then check allow patterns
+        if self.allow_set.is_match(url) {
+            return true;
         }
 
         // If we have allow rules but URL didn't match any, reject it
@@ -607,6 +607,37 @@ rules:
         assert!(!config.should_crawl("https://example.com/internal/admin"));
         // With allow rules present, non-matching URLs are rejected
         assert!(!config.should_crawl("https://example.com/public"));
+    }
+
+    #[test]
+    fn test_ignore_takes_precedence_over_allow() {
+        // Test that ignore rules take precedence when a URL matches both
+        // an allow pattern and an ignore pattern
+        let config = Config::from_yaml(
+            r#"
+rules:
+  - url: "https://pub.dev/packages/camera"
+    action: allow
+  - url: "https://pub.dev/packages/camera/**"
+    action: allow
+  - url: "*/versions/*"
+    action: ignore
+  - url: "*/versions"
+    action: ignore
+"#,
+        )
+        .unwrap();
+
+        // URL under allowed path but NOT matching ignore pattern should be allowed
+        assert!(config.should_crawl("https://pub.dev/packages/camera"));
+        assert!(config.should_crawl("https://pub.dev/packages/camera/example"));
+        assert!(config.should_crawl("https://pub.dev/packages/camera/changelog"));
+
+        // URL matching BOTH allow and ignore patterns should be IGNORED
+        // (ignore takes precedence)
+        assert!(!config.should_crawl("https://pub.dev/packages/camera/versions/0.10.6"));
+        assert!(!config.should_crawl("https://pub.dev/packages/camera/versions/0.9.4"));
+        assert!(!config.should_crawl("https://pub.dev/packages/camera/versions"));
     }
 
     #[test]
